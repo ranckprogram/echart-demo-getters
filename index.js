@@ -2,15 +2,9 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 
-
 const log = console.log;
 
-function getAllResourceList() {}
 
-// 5000 条差不多了
-function filterHighQualityResource() {}
-
-function writeToFile() {}
 
 function saveAsJSON(filename, data, callback) {
   fs.writeFile(
@@ -31,32 +25,47 @@ function saveAsJSON(filename, data, callback) {
 // function read
 
 function parseDownloadTask(filename) {
-  fs.readFile(
-    path.resolve(__dirname, "json", filename + ".json"),
-    function (err, data) {
-      // 读取文件失败/错误
-      if (err) {
-        throw err;
+  return new Promise((resolve, reject) => {
+    fs.readFile(
+      path.resolve(__dirname, "json", filename),
+      function (err, data) {
+        // 读取文件失败/错误
+        if (err) {
+          throw err;
+        }
+        // 读取文件成功
+        const charts = JSON.parse(data).data.charts;
+        resolve(charts);
       }
-      // 读取文件成功
-      console.log("utf-8: ", JSON.parse(data).data.charts);
-      const charts = JSON.parse(data).data.charts;
-    }
-  );
+    );
+  });
 }
 
-
 // 可能出现读的速度很快写的速度很慢，造成部分chunk丢失？？
-function downloadImg(url, filename, callback) {
+function downloader(url, filename, callback) {
   const writeStream = fs.createWriteStream(
     path.resolve(__dirname, "images", filename + ".png")
   );
   https.get(url, (res) => {
     res.pipe(writeStream);
+    res.on("end", () => {
+      log(filename, "下载成功");
+      typeof callback === "function" && callback();
+    });
   });
 }
 
-function download() {}
+function downloadMonitor(list, start = 0, downloader) {
+  let end = list.length;
+  if (start < end) {
+    const { cid, thumbnailURL } = list[start];
+    downloader(thumbnailURL, cid, () => {
+      downloadMonitor(list, start + 1, downloader);
+    });
+  } else {
+    console.log(start, end, "下载完成");
+  }
+}
 
 function downloadPage(pageSize, pageNum, maxPage) {
   const url = `https://www.makeapie.com/chart/list?builtinTags%5B%5D=category-work&sortBy=rank&pageSize=${pageSize}&pageNumber=${pageNum}&author=all`;
@@ -78,20 +87,33 @@ function downloadPage(pageSize, pageNum, maxPage) {
   });
 }
 
-function main() {
-  const allList = getAllResourceList();
+function readdir() {
+  return new Promise((resolve, rejects) => {
+    fs.readdir(path.resolve(__dirname, "json"), function (err, list) {
+      if (err) {
+        throw err;
+      }
+      resolve(list);
+    });
+  });
+}
+
+async function main() {
   const maxPage = 580;
   const pageSize = 32;
   let pageNum = 0;
 
   // downloadPage(pageSize, pageNum, maxPage);
 
+  const fileList = await readdir();
+  const dataList = [];
+  for (const file of fileList) {
+    const charts = await parseDownloadTask(file);
+    dataList.push(...charts);
+  }
 
-  parseDownloadTask()
-  // downloadImg(
-  //   "https://www.makeapie.com/ecg-storage/ec_gallery_thumbnail/xRCTSEN58U.png?v=1641539836825",
-  //   "ddd"
-  // );
+  // downloadMonitor(dataList, 0, downloader);
+  log(dataList[0], dataList.length);
 }
 
 main();
