@@ -4,8 +4,6 @@ const path = require("path");
 
 const log = console.log;
 
-
-
 function saveAsJSON(filename, data, callback) {
   fs.writeFile(
     path.resolve(__dirname, "json", filename + ".json"),
@@ -15,33 +13,24 @@ function saveAsJSON(filename, data, callback) {
         console.log(err);
         return;
       }
-      console.log(filename, "下载成功！");
+      log(filename, "下载成功！");
       typeof callback === "function" && callback();
     }
   );
 }
 
-// 读取指定目录的的文件，依次循环，逐渐同步遍历
-// function read
-
-function parseDownloadTask(filename) {
+function parseDownloadTask(dir, filename, fn) {
   return new Promise((resolve, reject) => {
-    fs.readFile(
-      path.resolve(__dirname, "json", filename),
-      function (err, data) {
-        // 读取文件失败/错误
-        if (err) {
-          throw err;
-        }
-        // 读取文件成功
-        const charts = JSON.parse(data).data.charts;
-        resolve(charts);
+    fs.readFile(path.resolve(__dirname, dir, filename), function (err, data) {
+      // 读取文件失败/错误
+      if (err) {
+        throw err;
       }
-    );
+      resolve(fn(data));
+    });
   });
 }
 
-// 可能出现读的速度很快写的速度很慢，造成部分chunk丢失？？
 function downloader(url, filename, callback) {
   const writeStream = fs.createWriteStream(
     path.resolve(__dirname, "images", filename + ".png")
@@ -49,21 +38,43 @@ function downloader(url, filename, callback) {
   https.get(url, (res) => {
     res.pipe(writeStream);
     res.on("end", () => {
-      log(filename, "下载成功");
       typeof callback === "function" && callback();
     });
   });
 }
 
-function downloadMonitor(list, start = 0, downloader) {
+function createDownloader(dir, fileType) {
+  fileType = fileType ? `.${fileType}`: ""
+  return function downloader(url, filename, callback) {
+    const writeStream = fs.createWriteStream(
+      path.resolve(__dirname, dir, `${filename}${fileType}`)
+    );
+    https.get(url, (res) => {
+      res.pipe(writeStream);
+      res.on("end", () => {
+        typeof callback === "function" && callback();
+      });
+ 
+    }).on('error', (e) => {
+      log("error");
+      log(url);
+      typeof callback === "function" && callback();    });;
+  };
+}
+
+function downloadMonitor(list, paramsFn, downloader, start = 0) {
   let end = list.length;
   if (start < end) {
-    const { cid, thumbnailURL } = list[start];
-    downloader(thumbnailURL, cid, () => {
-      downloadMonitor(list, start + 1, downloader);
+    if (!paramsFn(list[start])) {
+      return;
+    }
+    const { url, name } = paramsFn(list[start]);
+    downloader(url, name, () => {
+      log("下载完成", start);
+      downloadMonitor(list, paramsFn, downloader, start + 1);
     });
   } else {
-    console.log(start, end, "下载完成");
+    log(start, end, "下载完成");
   }
 }
 
@@ -87,15 +98,19 @@ function downloadPage(pageSize, pageNum, maxPage) {
   });
 }
 
-function readdir() {
+function readdir(dir) {
   return new Promise((resolve, rejects) => {
-    fs.readdir(path.resolve(__dirname, "json"), function (err, list) {
+    fs.readdir(path.resolve(__dirname, dir), function (err, list) {
       if (err) {
         throw err;
       }
       resolve(list);
     });
   });
+}
+
+function urlformatFilename(url, formart = "00000") {
+  return url.replace(/\//g, formart);
 }
 
 async function main() {
@@ -105,15 +120,59 @@ async function main() {
 
   // downloadPage(pageSize, pageNum, maxPage);
 
-  const fileList = await readdir();
-  const dataList = [];
-  for (const file of fileList) {
-    const charts = await parseDownloadTask(file);
-    dataList.push(...charts);
+  // const fileList = await readdir("json");
+  // const dataList = [];
+  // for (const file of fileList) {
+  //   const charts = await parseDownloadTask("json", file, function (data) {
+  //     return JSON.parse(data).data.charts;
+  //   });
+  //   dataList.push(...charts);
+  // }
+
+  // const dataDownloader = createDownloader("data", "json");
+  // const infoBaseUrl = "https://www.makeapie.com/chart/get"
+  // downloadMonitor(dataList, function (item) {
+  //   return {
+  //     url: `${infoBaseUrl}/${item.cid}`,
+  //     name: item.cid
+  //   }
+  // }, dataDownloader);
+
+  const dataJson = await readdir("data");
+  const dataDetailList = [];
+  for (const file of dataJson) {
+    const data = await parseDownloadTask("data", file, function (data) {
+      return JSON.parse(data).data;
+    });
+    if (data.externalScripts) {
+      dataDetailList.push(data);
+    }
   }
 
-  // downloadMonitor(dataList, 0, downloader);
-  log(dataList[0], dataList.length);
+  let externalScriptList = dataDetailList
+    .map((item) => item.externalScripts.split(","))
+    .flat();
+
+  const unrepeatedExternalScriptList = [...new Set(externalScriptList)]
+    .filter((item) => !item.includes("//"))
+    .filter((item) => item.includes(".js"));
+
+  // console.log(externalScriptList.length, unrepeatedExternalScriptList.length);
+
+  log(unrepeatedExternalScriptList.length);
+  const scriptDownloader = createDownloader("script", "");
+  const scriptBaseUrl = "https://gallerybox.makeapie.com";
+  downloadMonitor(
+    unrepeatedExternalScriptList,
+    function (item) {
+      console.log(`${scriptBaseUrl}${item}`, urlformatFilename(item));
+      return {
+        url: `${scriptBaseUrl}${item}`,
+        name: urlformatFilename(item),
+      };
+    },
+    scriptDownloader
+  );
 }
 
 main();

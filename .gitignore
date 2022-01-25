@@ -2,5 +2,6 @@ node_modules
 json
 images
 data
+script
 
 package-lock.json
