@@ -4,4 +4,16 @@ images
 data
 script
 
+json-back
+images-back
+data-back
+script-back
+
+jsonback
+imagesback
+databack
+scriptback
+
+echart-demo-getters.zip
+
 package-lock.json
